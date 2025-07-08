@@ -7,6 +7,7 @@ using static Logic.Unit;
 
 public class Logic
 {
+    public static void Wait(double seconds) { }
     public static class IO
     {
         public static void Print(string message) { }
@@ -44,15 +45,22 @@ public class Logic
             public static void Config(BlockType block, params object[] conf) { }
         }
         // generic sensor (basic block property)
-        public static void Sensor(string destVar, BlockType block, Property prop) { }
+        public static void Sensor<T>(out T destVar, string block, Property prop)
+        {
+            destVar = default(T);
+
+        }
+
         /// <summary>Read a specific <c>item</c> quantity from a container / core.</summary>
-        public static void SensorItem(string destVar, BlockType block, ItemType item) { }
-        /// <summary>Read a custom numeric cell (e.g., <c>@counter</c> or <c>memory[index]</c>).
-        /// The translator will decide correct low‑level syntax.</summary>
-        public static void SensorValue(string destVar, string what) { }
+        //public static void SensorItem(out string destVar, BlockType block, ItemType item) { }
+        ///// <summary>Read a custom numeric cell (e.g., <c>@counter</c> or <c>memory[index]</c>).
+        ///// The translator will decide correct low‑level syntax.</summary>
+        //public static void SensorValue(out string destVar, string what) { }
 
 
-        public static void GetLink(string destVar, int linkIndex) { }
+        public static void GetLink(out string destVar, int linkIndex)
+        {
+            destVar = ""; }
 
         public static void PrintFlush(BlockType messageBlock) { }
         public static void DrawFlush(BlockType displayBlock) { }
@@ -113,7 +121,11 @@ public class Logic
             public static void Flag(int value) { }
             public static void Build(double x, double y, BlockType block, int rotation, string config) { }
             public static void GetBlock(double x, double y, string type, string building, string floor) { }
-            public static void Within(double x, double y, double radius, string resultVar) { }
+
+            public static void Within(double x, double y, double radius, out bool resultVar)
+            {
+                resultVar = false;
+            }
         }
 
         public enum UnitType

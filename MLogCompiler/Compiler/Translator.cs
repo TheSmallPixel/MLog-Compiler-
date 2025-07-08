@@ -25,6 +25,11 @@ namespace MLogCompiler.Compiler
         private string Lbl(string p = "L") => $"{p}{_lbl++}";
 
         // ---------------- Statements ----------------
+        public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
+        {
+            // Only dive into method bodies; ignore signatures
+            if (node.Body != null) Visit(node.Body);
+        }
         public override void VisitLocalDeclarationStatement(LocalDeclarationStatementSyntax n)
         {
             foreach (var v in n.Declaration.Variables)
@@ -106,14 +111,36 @@ namespace MLogCompiler.Compiler
         {
             return e switch
             {
+                MemberAccessExpressionSyntax ma => TokenFromEnum(ma),
+                QualifiedNameSyntax qn => qn.Right.Identifier.Text,
+                PrefixUnaryExpressionSyntax pre when pre.IsKind(SyntaxKind.LogicalNotExpression) => UnaryNot(pre),
                 LiteralExpressionSyntax lit => Lit(lit),
                 IdentifierNameSyntax id => id.Identifier.Text,
                 BinaryExpressionSyntax bin => Bin(bin),
                 ParenthesizedExpressionSyntax p => Expr(p.Expression),
                 ConditionalExpressionSyntax ternary => Ternary(ternary),
+                DeclarationExpressionSyntax dec => (dec.Designation is SingleVariableDesignationSyntax svd) ? svd.Identifier.Text : throw new NotSupportedException("complex decl expr"),
                 InvocationExpressionSyntax inv => Invoke(inv),
                 _ => throw new NotSupportedException($"Expression not supported: {e.Kind()}")
             };
+        }
+
+        private string TokenFromEnum(MemberAccessExpressionSyntax ma)
+        {
+            var name = ma.Name.Identifier.Text;
+            var container = ma.Expression.ToString(); // e.g. Logic.Unit.ItemType
+            return container.EndsWith("ItemType") ? "@" + name.ToLower()
+                : container.EndsWith("BlockType") ? name.ToLower()     // no @
+                : container.EndsWith("Property") ? "@" + name.ToLower()
+                : name;
+        }
+        private string UnaryNot(PrefixUnaryExpressionSyntax n)
+        {
+            var a = Expr(n.Operand);
+            var t = Tmp();
+            // Mindustry has an op "not" (dest, a, 0)
+            _ir.Add(Ir.Op("not", t, a, "0"));
+            return t;
         }
 
         private string Lit(LiteralExpressionSyntax lit)
@@ -198,7 +225,7 @@ namespace MLogCompiler.Compiler
             switch (container)
             {
                 case "Logic": return HandleLogicRoot(mname, call);
-                case "Logic.Logic.Block": return HandleBlock(mname, call);
+                case "Logic.BlockControl": return HandleBlock(mname, call);
                 case "Block.Control": return HandleBlockControl(mname, call);
                 case "Logic.IO": return HandleIO(mname, call);
                 case "Logic.IO.Draw": return HandleDraw(mname, call);
@@ -241,17 +268,13 @@ namespace MLogCompiler.Compiler
             switch (name)
             {
                 case "Sensor":
-                    _ir.Add(Ir.Custom("sensor", Expr(call.ArgumentList.Arguments[0].Expression), EnumArgToToken(call.ArgumentList.Arguments[1], ""), call.ArgumentList.Arguments[2].Expression.ToString()));
-                    return Expr(call.ArgumentList.Arguments[0].Expression);
-                case "SensorItem":
-                    var itemTok = EnumArgToToken(call.ArgumentList.Arguments[2], "@item");
-                    _ir.Add(Ir.Custom("sensor", Expr(call.ArgumentList.Arguments[0].Expression), EnumArgToToken(call.ArgumentList.Arguments[1], ""), itemTok));
-                    return Expr(call.ArgumentList.Arguments[0].Expression);
-                case "SensorValue":
-                    _ir.Add(Ir.Custom("sensor", Expr(call.ArgumentList.Arguments[0].Expression), Expr(call.ArgumentList.Arguments[0].Expression), Expr(call.ArgumentList.Arguments[0].Expression)));
+                    _ir.Add(Ir.Custom("sensor",
+                        Expr(call.ArgumentList.Arguments[0].Expression),
+                        EnumArgToToken(call.ArgumentList.Arguments[1], ""),
+                        EnumArgToToken(call.ArgumentList.Arguments[2], "@")));
                     return Expr(call.ArgumentList.Arguments[0].Expression);
                 case "GetLink":
-                    _ir.Add(Ir.Custom("getlink", Expr(call.ArgumentList.Arguments[0].Expression), Expr(call.ArgumentList.Arguments[0].Expression)));
+                    _ir.Add(Ir.Custom("getlink", Expr(call.ArgumentList.Arguments[0].Expression), Expr(call.ArgumentList.Arguments[1].Expression)));
                     return Expr(call.ArgumentList.Arguments[0].Expression);
                 case "PrintFlush":
                     _ir.Add(Ir.Custom("printflush", EnumArgToToken(call.ArgumentList.Arguments[0], ""))); return "null";
@@ -337,7 +360,7 @@ namespace MLogCompiler.Compiler
             }
             var res = "locRes" + Tmp();
             _ir.Add(Ir.Custom("ulocate", (new[] { mode, res }).Concat(args).ToArray()));
-            return res; 
+            return res;
         }
         private string HandleRadar(string name, InvocationExpressionSyntax call)
         {
@@ -346,7 +369,7 @@ namespace MLogCompiler.Compiler
             args.AddRange(ConvertSortArgs(call.ArgumentList.Arguments[1], call.ArgumentList.Arguments[2]));
             args.AddRange(PosRadius(call, 3));
             _ir.Add(Ir.Custom("uradar", (new[] { res }).Concat(args).ToArray()));
-            return res; 
+            return res;
         }
         private string HandleUnitControl(string name, InvocationExpressionSyntax call)
         {
@@ -374,7 +397,14 @@ namespace MLogCompiler.Compiler
                 "within" => "within",
                 _ => null
             };
+
             if (action == null) throw new NotSupportedException(name);
+            if (action == "flag")
+            {
+                var v = Expr(call.ArgumentList.Arguments[0].Expression);
+                _ir.Add(Ir.Custom("ucontrol", "flag", v, "y", "0", "0", "0"));
+                return "null";
+            }
             _ir.Add(Ir.Custom("ucontrol", (new[] { action }).Concat(args).ToArray()));
             return "null";
         }
